@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 @plugin_manager.register_plugin(
     name="currency",
     description="Курсы валют и конвертер",
-    version="1.3"
+    version="1.4"
 )
 class CurrencyPlugin(BasePlugin):
     def __init__(self):
-        super().__init__("currency", "Курсы валют и конвертер", "1.3")
+        super().__init__("currency", "Курсы валют и конвертер", "1.4")
         self.cbr_url = "https://www.cbr-xml-daily.ru/daily_json.js"
         self.cache = {}
         self.cache_timeout = 300  # 5 минут
@@ -55,11 +55,11 @@ class CurrencyPlugin(BasePlugin):
             self.handle_back_button
         ))
         
-        # Обработчик текстовых запросов для конвертера (добавьте этот обработчик)
+        # Обработчик текстовых запросов для конвертера - ВЫСОКИЙ ПРИОРИТЕТ
         application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self.handle_text_conversion
-        ), group=1)  # Указываем группу, чтобы этот обработчик работал параллельно
+        ), group=0)  # Группа 0 - высший приоритет
         
         logger.info("✅ Currency plugin handlers setup completed")
 
@@ -67,104 +67,118 @@ class CurrencyPlugin(BasePlugin):
         """Обработчик текстовых запросов для конвертации валют"""
         user_message = update.message.text.strip()
         
-        # Пропускаем сообщения, которые уже обработаны другими плагинами
+        # Пропускаем сообщения, которые уже обработаны другими плагинами или являются кнопками
         if user_message in ["💱 Курсы валют", "💵 Основные валюты", "🔄 Конвертер", 
                            "📊 Все курсы", "📈 Изменения", "◀️ Назад"]:
-            return
+            return False
         
         # Проверяем, является ли сообщение запросом на конвертацию
         conversion_data = self._parse_conversion_request(user_message)
         if conversion_data:
+            logger.info(f"🔄 Processing currency conversion: {conversion_data}")
             await self._process_conversion(update, conversion_data)
-            return True  # Сообщение обработано
+            return True  # Сообщение обработано, останавливаем дальнейшую обработку
         
-        return False  # Сообщение не обработано
+        return False  # Сообщение не обработано, передаем дальше
 
     def _parse_conversion_request(self, text: str) -> dict:
         """Парсит текстовый запрос на конвертацию валют"""
-        # Паттерны для распознавания запросов
+        # Улучшенные паттерны для распознавания запросов
         patterns = [
-            r'(\d+(?:[.,]\d+)?)\s*([a-zA-Zа-яА-Я]{3,})\s+(?:в|to|->)\s+([a-zA-Zа-яА-Я]{3,})',
-            r'конвертировать\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Zа-яА-Я]{3,})\s+(?:в|в)\s+([a-zA-Zа-яА-Я]{3,})',
-            r'перевести\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Zа-яА-Я]{3,})\s+(?:в|в)\s+([a-zA-Zа-яА-Я]{3,})',
-            r'(\d+(?:[.,]\d+)?)\s*\$?\s*(?:доллар|usd)\s*(?:в|to)\s*(?:рубл|rub)',
-            r'(\d+(?:[.,]\d+)?)\s*(?:евро|eur)\s*(?:в|to)\s*(?:рубл|rub)',
-            r'(\d+(?:[.,]\d+)?)\s*(?:рубл|rub)\s*(?:в|to)\s*(?:доллар|\$|usd)',
-            r'(\d+(?:[.,]\d+)?)\s*(?:рубл|rub)\s*(?:в|to)\s*(?:евро|eur)'
+            # Формат: 100 USD to RUB
+            r'(\d+(?:[.,]\d+)?)\s*([a-zA-Z]{3})\s+(?:to|в|->)\s+([a-zA-Z]{3})',
+            # Формат: 100 долларов в рубли
+            r'(\d+(?:[.,]\d+)?)\s*([a-zA-Zа-яА-Я]{2,})\s+(?:в|to|->)\s+([a-zA-Zа-яА-Я]{2,})',
+            # Формат: конвертировать 100 USD в RUB
+            r'(?:конвертировать|перевести)\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Zа-яА-Я]{2,})\s+(?:в|to|->)\s+([a-zA-Zа-яА-Я]{2,})',
         ]
         
-        text_lower = text.lower()
+        text_lower = text.lower().strip()
+        logger.info(f"🔄 Parsing currency request: '{text}' -> '{text_lower}'")
         
+        # Специальные случаи для популярных валют
+        special_cases = [
+            # USD to RUB
+            (r'(\d+(?:[.,]\d+)?)\s*(?:usd|\$|доллар)\s*(?:в|to)\s*(?:rub|рубл)', 'USD', 'RUB'),
+            # RUB to USD
+            (r'(\d+(?:[.,]\d+)?)\s*(?:rub|рубл)\s*(?:в|to)\s*(?:usd|\$|доллар)', 'RUB', 'USD'),
+            # EUR to RUB
+            (r'(\d+(?:[.,]\d+)?)\s*(?:eur|евро)\s*(?:в|to)\s*(?:rub|рубл)', 'EUR', 'RUB'),
+            # RUB to EUR
+            (r'(\d+(?:[.,]\d+)?)\s*(?:rub|рубл)\s*(?:в|to)\s*(?:eur|евро)', 'RUB', 'EUR'),
+            # USD to EUR
+            (r'(\d+(?:[.,]\d+)?)\s*(?:usd|\$|доллар)\s*(?:в|to)\s*(?:eur|евро)', 'USD', 'EUR'),
+            # EUR to USD
+            (r'(\d+(?:[.,]\d+)?)\s*(?:eur|евро)\s*(?:в|to)\s*(?:usd|\$|доллар)', 'EUR', 'USD'),
+        ]
+        
+        # Сначала проверяем специальные случаи
+        for pattern, from_curr, to_curr in special_cases:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                amount = float(match.group(1).replace(',', '.'))
+                logger.info(f"✅ Special case matched: {amount} {from_curr} -> {to_curr}")
+                return {
+                    'amount': amount,
+                    'from_currency': from_curr,
+                    'to_currency': to_curr,
+                    'original_text': text
+                }
+        
+        # Затем проверяем общие паттерны
         for pattern in patterns:
             match = re.search(pattern, text_lower, re.IGNORECASE)
             if match:
                 amount = float(match.group(1).replace(',', '.'))
-                
-                if len(match.groups()) == 3:
-                    from_currency = self._normalize_currency(match.group(2))
-                    to_currency = self._normalize_currency(match.group(3))
-                else:
-                    # Для специальных паттернов с 1 группой
-                    if 'доллар' in text_lower or 'usd' in text_lower or '$' in text:
-                        if 'рубл' in text_lower:
-                            from_currency = 'USD'
-                            to_currency = 'RUB'
-                        else:
-                            from_currency = 'RUB'
-                            to_currency = 'USD'
-                    elif 'евро' in text_lower or 'eur' in text_lower:
-                        if 'рубл' in text_lower:
-                            from_currency = 'EUR'
-                            to_currency = 'RUB'
-                        else:
-                            from_currency = 'RUB'
-                            to_currency = 'EUR'
+                from_currency = self._normalize_currency(match.group(2))
+                to_currency = self._normalize_currency(match.group(3))
                 
                 if from_currency and to_currency:
+                    logger.info(f"✅ General pattern matched: {amount} {from_currency} -> {to_currency}")
                     return {
                         'amount': amount,
                         'from_currency': from_currency,
                         'to_currency': to_currency,
                         'original_text': text
                     }
+                else:
+                    logger.warning(f"❌ Currency normalization failed: '{match.group(2)}' -> '{from_currency}', '{match.group(3)}' -> '{to_currency}'")
         
+        logger.info(f"❌ No currency patterns matched for: {text}")
         return None
 
     def _normalize_currency(self, currency_str: str) -> str:
         """Нормализует название валюты к стандартному коду"""
         currency_map = {
             # Русские названия
-            'рубль': 'RUB', 'руб': 'RUB', 'рублей': 'RUB', 'р': 'RUB',
-            'доллар': 'USD', 'долларов': 'USD', 'доллары': 'USD', 'usd': 'USD', '$': 'USD',
+            'рубль': 'RUB', 'руб': 'RUB', 'рублей': 'RUB', 'рубли': 'RUB', 'р': 'RUB',
+            'доллар': 'USD', 'долларов': 'USD', 'доллары': 'USD', 'доллара': 'USD', 'usd': 'USD', '$': 'USD',
             'евро': 'EUR', 'eur': 'EUR', '€': 'EUR',
-            'юань': 'CNY', 'юаней': 'CNY', 'cny': 'CNY',
-            'фунт': 'GBP', 'фунтов': 'GBP', 'gbp': 'GBP',
-            'иена': 'JPY', 'иен': 'JPY', 'yen': 'JPY', 'jpy': 'JPY',
-            'франк': 'CHF', 'франков': 'CHF', 'chf': 'CHF',
-            'лира': 'TRY', 'лир': 'TRY', 'try': 'TRY',
+            'юань': 'CNY', 'юаней': 'CNY', 'юаня': 'CNY', 'cny': 'CNY',
+            'фунт': 'GBP', 'фунтов': 'GBP', 'фунта': 'GBP', 'gbp': 'GBP',
+            'иена': 'JPY', 'иен': 'JPY', 'иены': 'JPY', 'yen': 'JPY', 'jpy': 'JPY',
+            'франк': 'CHF', 'франков': 'CHF', 'франка': 'CHF', 'chf': 'CHF',
+            'лира': 'TRY', 'лир': 'TRY', 'лиры': 'TRY', 'try': 'TRY',
             'тенге': 'KZT', 'kzt': 'KZT',
-            
-            # Английские названия
-            'ruble': 'RUB', 'rubl': 'RUB',
-            'dollar': 'USD',
-            'euro': 'EUR',
-            'yuan': 'CNY',
-            'pound': 'GBP',
-            'yen': 'JPY',
-            'frank': 'CHF',
-            'lira': 'TRY',
-            'tenge': 'KZT'
         }
         
-        # Проверяем напрямую
+        # Очищаем строку
         clean_str = currency_str.strip().lower()
+        logger.info(f"🔄 Normalizing currency: '{currency_str}' -> '{clean_str}'")
+        
+        # Проверяем напрямую в мапе
         if clean_str in currency_map:
-            return currency_map[clean_str]
+            result = currency_map[clean_str]
+            logger.info(f"✅ Direct map: '{clean_str}' -> '{result}'")
+            return result
         
         # Проверяем по коду (если введен код валюты)
-        if clean_str.upper() in self.supported_currencies:
-            return clean_str.upper()
+        clean_upper = clean_str.upper()
+        if clean_upper in self.supported_currencies:
+            logger.info(f"✅ Code match: '{clean_upper}'")
+            return clean_upper
         
+        logger.warning(f"❌ Currency not found: '{clean_str}'")
         return None
 
     async def _process_conversion(self, update: Update, conversion_data: dict):
@@ -173,19 +187,31 @@ class CurrencyPlugin(BasePlugin):
         from_curr = conversion_data['from_currency']
         to_curr = conversion_data['to_currency']
         
-        await update.message.reply_text(f"💱 Конвертирую {amount} {from_curr} в {to_curr}...")
+        logger.info(f"💱 Starting conversion: {amount} {from_curr} -> {to_curr}")
         
         try:
             rates_data = await self._get_cbr_rates()
             
-            if from_curr not in rates_data or to_curr not in rates_data:
+            # Проверяем доступность валют
+            if from_curr not in rates_data:
+                logger.error(f"❌ From currency not found: {from_curr}")
                 await update.message.reply_text(
-                    f"❌ Не удалось найти курсы для указанных валют.\n"
+                    f"❌ Валюта '{from_curr}' не найдена.\n"
                     f"Доступные валюты: {', '.join(self.supported_currencies.keys())}"
                 )
                 return
             
-            # Конвертация через RUB как базовую валюту
+            if to_curr not in rates_data:
+                logger.error(f"❌ To currency not found: {to_curr}")
+                await update.message.reply_text(
+                    f"❌ Валюта '{to_curr}' не найдена.\n"
+                    f"Доступные валюты: {', '.join(self.supported_currencies.keys())}"
+                )
+                return
+            
+            await update.message.reply_text(f"💱 Конвертирую {amount} {from_curr} в {to_curr}...")
+            
+            # Получаем курсы
             if from_curr == 'RUB':
                 from_rate = 1.0
             else:
@@ -196,14 +222,20 @@ class CurrencyPlugin(BasePlugin):
             else:
                 to_rate = rates_data[to_curr]['value']
             
-            # Конвертируем
+            logger.info(f"📊 Rates: {from_curr} = {from_rate} RUB, {to_curr} = {to_rate} RUB")
+            
+            # ПРАВИЛЬНАЯ формула конвертации
             if from_curr == 'RUB':
+                # Из RUB в другую валюту: сумма / курс целевой валюты
                 result = amount / to_rate
             elif to_curr == 'RUB':
+                # Из другой валюты в RUB: сумма * курс исходной валюты
                 result = amount * from_rate
             else:
                 # Конвертация между двумя валютами через RUB
-                result = (amount * from_rate) / to_rate
+                # Сначала конвертируем в RUB, потом в целевую валюту
+                amount_in_rub = amount * from_rate
+                result = amount_in_rub / to_rate
             
             # Форматируем результат
             from_currency_name = self.supported_currencies.get(from_curr, from_curr)
@@ -215,23 +247,24 @@ class CurrencyPlugin(BasePlugin):
                 f"*{result:.2f} {to_curr}* ({to_currency_name})\n\n"
             )
             
-            # Добавляем курсы
+            # Добавляем курсы для информации
             if from_curr != 'RUB':
-                response += f"📊 Курс {from_curr}: {rates_data[from_curr]['value']:.2f} RUB\n"
+                response += f"📊 Курс {from_curr}: {from_rate:.2f} RUB\n"
             if to_curr != 'RUB':
-                response += f"📊 Курс {to_curr}: {rates_data[to_curr]['value']:.2f} RUB\n"
+                response += f"📊 Курс {to_curr}: {to_rate:.2f} RUB\n"
             
             response += f"\n🕐 *Курсы ЦБ РФ на {rates_data.get('date', 'сегодня')}*"
             
             await update.message.reply_text(response, parse_mode='Markdown')
+            logger.info(f"✅ Conversion successful: {amount} {from_curr} = {result:.2f} {to_curr}")
             
         except Exception as e:
-            logger.error(f"Conversion error: {e}")
+            logger.error(f"❌ Conversion error: {e}")
             await update.message.reply_text(
                 "❌ Ошибка при конвертации. Попробуйте позже."
             )
 
-    # Остальные методы класса остаются без изменений...
+    # Остальные методы остаются без изменений...
     async def currency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /currency"""
         logger.info("Currency command called")

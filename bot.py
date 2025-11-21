@@ -517,19 +517,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error checking weather plugin city input: {e}")
 
-    # ВТОРОЕ: Проверяем, не является ли сообщение запросом на конвертацию валют
-    if PLUGINS_AVAILABLE:
-        try:
-            currency_plugin = plugin_manager.get_plugin("currency")
-            if currency_plugin and currency_plugin.is_initialized():
-                # Пробуем обработать как запрос конвертации
-                processed = await currency_plugin.handle_text_conversion(update, context)
-                if processed:
-                    logger.info(f"Message processed by currency plugin: {user_message}")
-                    return  # Сообщение обработано плагином валют
-        except Exception as e:
-            logger.error(f"Error checking currency plugin conversion: {e}")
-
     # Обработка кнопок основного меню (только основные кнопки, не плагины)
     button_handlers = {
         "❓ Помощь": help_command,
