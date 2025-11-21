@@ -135,11 +135,18 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+<<<<<<< HEAD
+=======
+.env
+>>>>>>> e55019368375812c89cd6b2958473fef4d9199bf
 .envrc
 .venv
 env/
 venv/
+<<<<<<< HEAD
 ven/
+=======
+>>>>>>> e55019368375812c89cd6b2958473fef4d9199bf
 ENV/
 env.bak/
 venv.bak/
@@ -204,4 +211,8 @@ cython_debug/
 # Marimo
 marimo/_static/
 marimo/_lsp/
+<<<<<<< HEAD
 __marimo__/
+=======
+__marimo__/
+>>>>>>> e55019368375812c89cd6b2958473fef4d9199bf
