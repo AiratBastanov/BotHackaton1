@@ -1,0 +1,16 @@
+services:
+  telegram-bot:
+    build: .
+    container_name: telegram-ai-bot
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
