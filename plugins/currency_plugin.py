@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 @plugin_manager.register_plugin(
     name="currency",
     description="Курсы валют и конвертер",
-    version="1.4"
+    version="1.5"
 )
 class CurrencyPlugin(BasePlugin):
     def __init__(self):
-        super().__init__("currency", "Курсы валют и конвертер", "1.4")
+        super().__init__("currency", "Курсы валют и конвертер", "1.5")
         self.cbr_url = "https://www.cbr-xml-daily.ru/daily_json.js"
         self.cache = {}
         self.cache_timeout = 300  # 5 минут
@@ -264,7 +264,6 @@ class CurrencyPlugin(BasePlugin):
                 "❌ Ошибка при конвертации. Попробуйте позже."
             )
 
-    # Остальные методы остаются без изменений...
     async def currency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /currency"""
         logger.info("Currency command called")
@@ -473,6 +472,14 @@ class CurrencyPlugin(BasePlugin):
                                 'change_percent': ((rate_info['Value'] - rate_info['Previous']) / rate_info['Previous']) * 100
                             }
                         
+                        # ВАЖНО: Добавляем RUB вручную, так как это базовая валюта
+                        rates['RUB'] = {
+                            'value': 1.0,
+                            'previous': 1.0,
+                            'change': 0.0,
+                            'change_percent': 0.0
+                        }
+                        
                         rates['date'] = data['Date'][:10]
                         
                         # Кешируем данные
@@ -497,6 +504,7 @@ class CurrencyPlugin(BasePlugin):
             'CHF': {'value': 105.2, 'previous': 104.8, 'change': 0.4, 'change_percent': 0.38},
             'TRY': {'value': 2.8, 'previous': 2.7, 'change': 0.1, 'change_percent': 3.70},
             'KZT': {'value': 0.19, 'previous': 0.19, 'change': 0.0, 'change_percent': 0.0},
+            'RUB': {'value': 1.0, 'previous': 1.0, 'change': 0.0, 'change_percent': 0.0},  # Добавляем RUB
             'date': datetime.now().strftime('%Y-%m-%d')
         }
 
