@@ -2,6 +2,7 @@ import aiohttp
 import os
 import json
 import re
+import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, MessageHandler, filters, CommandHandler
@@ -461,15 +462,19 @@ class CurrencyPlugin(BasePlugin):
                 async with session.get(self.cbr_url, timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
-                        logger.info("Successfully fetched currency rates from CBR")
+                        logger.info(f"✅ Successfully fetched currency rates from CBR. Date: {data.get('Date')}")
                         
                         rates = {}
                         for currency, rate_info in data['Valute'].items():
+                            # Рассчитываем изменения
+                            change = rate_info['Value'] - rate_info['Previous']
+                            change_percent = ((rate_info['Value'] - rate_info['Previous']) / rate_info['Previous']) * 100
+                            
                             rates[currency] = {
                                 'value': rate_info['Value'],
                                 'previous': rate_info['Previous'],
-                                'change': rate_info['Value'] - rate_info['Previous'],
-                                'change_percent': ((rate_info['Value'] - rate_info['Previous']) / rate_info['Previous']) * 100
+                                'change': change,
+                                'change_percent': change_percent
                             }
                         
                         # ВАЖНО: Добавляем RUB вручную, так как это базовая валюта
@@ -480,31 +485,48 @@ class CurrencyPlugin(BasePlugin):
                             'change_percent': 0.0
                         }
                         
-                        rates['date'] = data['Date'][:10]
+                        rates['date'] = data['Date'][:10]  # Берем только дату без времени
+                        
+                        # Логируем полученные курсы для отладки
+                        logger.info(f"📊 Received rates for: {list(rates.keys())[:5]}...")  # Первые 5 валют
+                        logger.info(f"📊 USD rate: {rates.get('USD', {}).get('value', 'N/A')}")
+                        logger.info(f"📊 EUR rate: {rates.get('EUR', {}).get('value', 'N/A')}")
+                        logger.info(f"📊 CNY rate: {rates.get('CNY', {}).get('value', 'N/A')}")
                         
                         # Кешируем данные
                         self.cache[cache_key] = (datetime.now().timestamp(), rates)
                         return rates
                     else:
-                        logger.error(f"CBR API error: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"❌ CBR API error: {response.status} - {error_text}")
+                        logger.info("🔄 Falling back to mock rates")
                         return self._get_mock_rates()
-        except Exception as e:
-            logger.error(f"CBR API request failed: {e}")
+        except asyncio.TimeoutError:
+            logger.error("❌ CBR API request timeout")
+            logger.info("🔄 Falling back to mock rates")
             return self._get_mock_rates()
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ CBR API connection error: {e}")
+            logger.info("🔄 Falling back to mock rates")
+            return self._get_mock_rates()
+        except Exception as e:
+            logger.error(f"❌ CBR API request failed: {e}")
+            logger.info("🔄 Falling back to mock rates")
+            return self._get_mock_rates()   
 
     def _get_mock_rates(self):
         """Мок-данные для валют (если API недоступно)"""
-        logger.info("Using mock currency rates")
+        logger.info("Using mock currency rates based on actual CBR data")
         return {
-            'USD': {'value': 91.5, 'previous': 90.8, 'change': 0.7, 'change_percent': 0.77},
-            'EUR': {'value': 99.2, 'previous': 98.5, 'change': 0.7, 'change_percent': 0.71},
-            'CNY': {'value': 12.8, 'previous': 12.7, 'change': 0.1, 'change_percent': 0.79},
-            'GBP': {'value': 115.3, 'previous': 114.9, 'change': 0.4, 'change_percent': 0.35},
-            'JPY': {'value': 0.61, 'previous': 0.60, 'change': 0.01, 'change_percent': 1.67},
-            'CHF': {'value': 105.2, 'previous': 104.8, 'change': 0.4, 'change_percent': 0.38},
-            'TRY': {'value': 2.8, 'previous': 2.7, 'change': 0.1, 'change_percent': 3.70},
-            'KZT': {'value': 0.19, 'previous': 0.19, 'change': 0.0, 'change_percent': 0.0},
-            'RUB': {'value': 1.0, 'previous': 1.0, 'change': 0.0, 'change_percent': 0.0},  # Добавляем RUB
+            'USD': {'value': 80.7321, 'previous': 80.9448, 'change': -0.2127, 'change_percent': -0.26},
+            'EUR': {'value': 92.6047, 'previous': 93.7804, 'change': -1.1757, 'change_percent': -1.25},
+            'CNY': {'value': 11.2795, 'previous': 11.3434, 'change': -0.0639, 'change_percent': -0.56},
+            'GBP': {'value': 105.5976, 'previous': 106.3938, 'change': -0.7962, 'change_percent': -0.75},
+            'JPY': {'value': 0.513694, 'previous': 0.520713, 'change': -0.007019, 'change_percent': -1.35},
+            'CHF': {'value': 100.2136, 'previous': 101.0295, 'change': -0.8159, 'change_percent': -0.81},
+            'TRY': {'value': 1.90794, 'previous': 1.91349, 'change': -0.00555, 'change_percent': -0.29},
+            'KZT': {'value': 0.15543, 'previous': 0.155361, 'change': 0.000069, 'change_percent': 0.04},
+            'RUB': {'value': 1.0, 'previous': 1.0, 'change': 0.0, 'change_percent': 0.0},
             'date': datetime.now().strftime('%Y-%m-%d')
         }
 
